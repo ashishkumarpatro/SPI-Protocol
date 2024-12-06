@@ -1,0 +1,151 @@
+module SPI(clk,newd,rst,din,sclk,cs,mosi,miso);
+input clk, newd, rst;
+input [7:0] din; 
+output reg sclk,cs,mosi,miso;
+reg [1:0] state;
+
+parameter idle = 2'b00;
+parameter enable = 2'b01;
+parameter send = 2'b10;
+parameter comp = 2'b11;
+
+initial begin
+  state = idle;
+end
+  
+integer countc = 0;
+integer count = 0;
+
+  
+  //generation of sclk
+ always@(posedge clk)
+  begin
+    if(rst == 1'b1) begin
+      countc <= 0;
+      sclk <= 1'b0;
+    end
+    else begin 
+      if(countc < 10 ) //depending upon the frequence of input clock
+          countc <= countc + 1;
+      else
+          begin
+          countc <= 0;
+          sclk <= ~sclk;
+          end
+    end
+  end
+  
+  
+//state machine
+  reg [7:0] temp;
+  always@(posedge sclk) //working on positive edge of sclk(mode =0)
+  begin
+    if(rst == 1'b1) begin
+      cs <= 1'b1; 
+      mosi <= 1'b0;
+      miso <= 1'b0;
+    end
+    else begin
+     case(state)
+         idle:
+             begin
+               if(newd == 1'b1) begin
+                 state <= send;
+                 temp <= din; 
+                 cs <= 1'b0;
+               end
+               else begin
+                 state <= idle;
+                 temp <= 8'b0;
+               end
+             end
+ send : begin
+   if(count <= 7) begin
+           mosi <= temp [count]; /////sending lsb first
+           count <= count + 1;
+     		miso <= 1'b0;
+         end
+         else
+             begin
+               count <= 0; //to utilise for the next tx
+               state <= idle;
+               cs <= 1'b1;
+               mosi <= 1'b0; //default value of MOSI is 0
+             end
+       end
+       
+                
+      default : state <= idle; 
+       
+   endcase
+  end 
+ end
+  
+endmodule
+
+
+//SPI SLAVE
+module spi_slave(sclk,cs,mosi,miso,dout,done);
+input sclk, cs, mosi, miso;
+output [7:0] dout;
+output reg done;
+reg [1:0] state;
+
+parameter detect_start = 1'b0;
+parameter read_data = 1'b1;
+
+initial begin
+ state = detect_start;
+end
+
+reg [7:0] temp = 8'b00000000;
+integer count = 0;
+
+always@(posedge sclk)
+begin
+
+case(state)
+detect_start: 
+begin
+done   <= 1'b0;
+if(cs == 1'b0)
+ state <= read_data;
+ else
+ state <= detect_start;
+end
+
+read_data : begin
+  if(count <= 7)
+ begin
+ count <= count + 1;
+   temp  <= { mosi, temp[7:1]};
+end
+ else
+ begin
+ count <= 0;
+ done <= 1'b1;
+ state <= detect_start;
+ end
+
+end
+
+endcase
+end
+assign dout = temp;
+
+endmodule
+
+
+
+//COMBINATION OF MASTER + SLAVE 
+module top (
+input clk, rst, newd,
+  input [7:0] din,
+  output [7:0] dout,
+output done
+);
+
+wire sclk, cs, mosi, miso;
+  spi_master m1 (clk, newd, rst, din, sclk, cs, mosi, miso);
+  spi_slave s1  (sclk, cs, mosi, miso, dout, done);
+endmodule
